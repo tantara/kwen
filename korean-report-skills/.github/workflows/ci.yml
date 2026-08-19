@@ -1,0 +1,196 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 검사는 두 OS 에서, 산출물은 우분투 한 곳에서만 만든다.
+  #
+  # 윈도를 붙인 이유 — 우분투 하나로만 돌던 동안 cp949 · 경로 구분자 · CRLF 가
+  # 통째로 사각이었다. 검사기가 stdin 을 cp949 로 읽어 한글을 깨뜨리고도
+  # 「위반 없음」으로 통과하던 결함이 로컬(윈도)에서만 드러난 적이 있다.
+  # 개발 환경이 CI 보다 엄격하면 CI 가 하는 일이 없다.
+  test:
+    strategy:
+      fail-fast: false      # 한쪽이 깨져도 다른 쪽 결과를 함께 본다
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      - name: npm 배포본·OpenCode 검사
+        run: npm run test:package
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install pytest playwright ruff
+      # --with-deps 는 리눅스 전용이다. 윈도에 주면 실패한다.
+      - run: playwright install --with-deps chromium
+        if: runner.os == 'Linux'
+      - run: playwright install chromium
+        if: runner.os != 'Linux'
+
+      - name: 린트
+        run: ruff check .
+
+      - name: 빌더 검사 (node)
+        run: npm run test:node
+
+      - name: 정합성·기하·파이프라인 검사 (python)
+        run: pytest -q
+
+      # 아래부터는 검사가 아니라 산출물 제작이므로 한 곳에서만 돈다.
+      # 배너는 글꼴 렌더가 OS 마다 달라 우분투가 기준이고, pack-skills.sh 는
+      # zip · unzip 에 의존한다. 파이프라인 자체는 두 OS 의 pytest 가
+      # tests/test_build_e2e.py 로 이미 통과시킨다 — PDF 출력까지 포함한다.
+      - name: 예시 문서 빌드
+        if: runner.os == 'Linux'
+        run: |
+          python examples/build_example.py
+          for m in paper deck; do
+            node plugins/korean-report/skills/korean-report-doc/assets/mathbuild.js \
+              "dist/example_${m}_raw.html" "dist/example_${m}.html" \
+              --assets plugins/korean-report/skills/korean-report-doc/assets
+          done
+          python scripts/qa.py dist/example_paper.html dist/example_deck.html --pdf --shot dist/shots
+
+      - name: README 전후 대비 자산 빌드
+        if: runner.os == 'Linux'
+        run: |
+          python examples/build_before_after.py
+          node plugins/korean-report/skills/korean-report-doc/assets/mathbuild.js \
+            dist/ba_after_raw.html dist/ba_after.html \
+            --assets plugins/korean-report/skills/korean-report-doc/assets
+          python scripts/qa.py dist/ba_after.html
+
+      # README 이미지는 이 러너(우분투)에서 찍은 것이 기준이다. 글꼴 렌더가 OS 마다
+      # 달라 윈도·맥에서 재생성하면 바이트가 어긋난다 — 다시 찍어 커밋해도 또 어긋난다.
+      # 그래서 어긋나면 여기서 찍은 PNG 를 산출물로 올린다. 그것을 내려받아 커밋한다.
+      - name: README 자산 재생성과 대조
+        id: shots
+        if: runner.os == 'Linux'
+        run: |
+          python scripts/build-shots.py
+          if ! git diff --exit-code --stat \
+               docs/assets/banner-light.png docs/assets/banner-dark.png \
+               docs/assets/ba_before.png docs/assets/ba_after.png docs/assets/ba_after_body.png; then
+            echo "README 이미지가 예시 문서와 어긋난다."
+            echo "이 실행의 shots-regenerated 산출물을 내려받아 docs/assets/ 에 덮어쓰고 커밋한다."
+            echo "로컬(윈도·맥) 재생성은 글꼴 렌더가 달라 다시 어긋나므로 쓰지 않는다."
+            exit 1
+          fi
+
+      - name: 어긋난 README 이미지를 산출물로 올린다
+        if: failure() && steps.shots.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots-regenerated
+          path: |
+            docs/assets/banner-*.png
+            docs/assets/ba_*.png
+
+      - name: 스킬 패키징
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/pack-skills.sh
+          bash scripts/pack-skills.sh --verify
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: example-documents
+          path: |
+            dist/example_*.html
+            dist/example_*.pdf
+            dist/shots/*.png
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: skills
+          path: dist/*.skill
+          retention-days: 14
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # npm trusted publishing은 Node 22.14+ · npm 11.5.1+가 필요하다.
+      # npmjs.com 패키지 설정에서 이 workflow(ci.yml)를 trusted publisher로 등록한다.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # 재실행 시 tarball integrity 대조가 npm CLI 갱신으로 흔들리지 않게 고정한다.
+      - run: npm install --global npm@11.6.2
+
+      - run: npm ci
+
+      - name: tag와 package version 대조
+        run: node scripts/check-release-tag.js "${GITHUB_REF_NAME}"
+
+      - name: npm 배포본·OpenCode 재검사
+        run: npm run test:package
+
+      - name: 스킬 패키징
+        run: bash scripts/pack-skills.sh
+
+      # npm 게시 뒤 GitHub Release 생성이 실패해도 재실행할 수 있다. 같은 version이
+      # 이미 있으면 tarball integrity가 같은 경우에만 게시를 건너뛴다.
+      - name: npm 게시 상태 확인
+        id: npm_release
+        shell: bash
+        run: |
+          package_spec=$(node -p "const p=require('./package.json'); p.name + '@' + p.version")
+          if registry_json=$(npm view "${package_spec}" dist.integrity --json 2>/dev/null); then
+            registry_integrity=$(node -e "process.stdout.write(JSON.parse(process.argv[1]))" "${registry_json}")
+            local_integrity=$(npm pack --dry-run --json | \
+              node -e "let s=''; process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s)[0].integrity))")
+            if [[ "${registry_integrity}" != "${local_integrity}" ]]; then
+              echo "npm ${package_spec}가 이미 있으나 현재 tag의 tarball과 다르다." >&2
+              exit 1
+            fi
+            echo "publish=false" >> "${GITHUB_OUTPUT}"
+            echo "npm ${package_spec}는 같은 tarball로 이미 게시되어 있다."
+          else
+            echo "publish=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: npm 게시
+        if: steps.npm_release.outputs.publish == 'true'
+        run: npm publish --access public
+
+      - name: 릴리스에 .skill 첨부
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/*.skill --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/*.skill --generate-notes
+          fi
