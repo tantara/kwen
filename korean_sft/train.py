@@ -179,7 +179,11 @@ def run_sft(cfg: dict[str, Any], dataset) -> dict[str, Any]:
         ),
     )
     trainer.train()
-    return {"ok": True, "trainer": "SFTTrainer"}
+    out = str(cfg["output_dir"])
+    model.save_pretrained(out)
+    tokenizer.save_pretrained(out)
+    print(f"saved LoRA adapters to {out}")
+    return {"ok": True, "trainer": "SFTTrainer", "output_dir": out}
 
 
 def main(argv: list[str] | None = None) -> int:
