@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,48 @@ def _load_unsloth(model_name: str, adapter: str | None, max_seq: int):
     return model, tokenizer
 
 
+_THINK = re.compile(r"<think>.*?</think>", re.S)
+
+
+def strip_think(text: str) -> str:
+    return _THINK.sub("", text or "").strip()
+
+
+def encode_prompt(tokenizer, prompt: str):
+    """Tokenize text without hitting the Qwen3.5 VL processor image path.
+
+    Unsloth patches Processor.__call__(images, text, videos). A positional
+    prompt is treated as `images=` and crashes. Prefer the inner tokenizer,
+    else pass `text=` explicitly.
+    """
+    inner = getattr(tokenizer, "tokenizer", None)
+    if inner is not None and inner is not tokenizer:
+        return inner(prompt, return_tensors="pt")
+    try:
+        return tokenizer(text=prompt, return_tensors="pt")
+    except TypeError:
+        return tokenizer(prompt, return_tensors="pt")
+
+
+def _to_device(batch, device):
+    if hasattr(batch, "to"):
+        try:
+            return batch.to(device)
+        except Exception:
+            pass
+    out = {}
+    for key, val in dict(batch).items():
+        out[key] = val.to(device) if hasattr(val, "to") else val
+    return out
+
+
+def _decode(tokenizer, token_ids) -> str:
+    inner = getattr(tokenizer, "tokenizer", None) or tokenizer
+    if hasattr(inner, "decode"):
+        return inner.decode(token_ids, skip_special_tokens=True)
+    return tokenizer.decode(token_ids, skip_special_tokens=True)
+
+
 def generate_one(model, tokenizer, scenario: dict[str, Any], max_new: int) -> str:
     prompt = prompt_for(scenario)
     if hasattr(tokenizer, "apply_chat_template"):
@@ -86,9 +129,8 @@ def generate_one(model, tokenizer, scenario: dict[str, Any], max_new: int) -> st
             kwargs: dict[str, Any] = {
                 "tokenize": False,
                 "add_generation_prompt": True,
+                "enable_thinking": False,
             }
-            # Qwen3.5 thinking models: keep the eval on the spoken reply.
-            kwargs["enable_thinking"] = False
             prompt = tokenizer.apply_chat_template(
                 [
                     {"role": "system", "content": SYSTEM},
@@ -96,25 +138,37 @@ def generate_one(model, tokenizer, scenario: dict[str, Any], max_new: int) -> st
                 ],
                 **kwargs,
             )
+        except TypeError:
+            prompt = tokenizer.apply_chat_template(
+                [
+                    {"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": scenario["instruction"]},
+                ],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
         except Exception:
             pass
-    inputs = tokenizer(prompt, return_tensors="pt")
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    inputs = encode_prompt(tokenizer, prompt)
+    device = getattr(model, "device", None)
+    if device is None:
+        device = next(model.parameters()).device
+    inputs = _to_device(inputs, device)
     gen_kwargs: dict[str, Any] = {
         "max_new_tokens": max_new,
         "temperature": 0.7,
         "do_sample": True,
         "top_p": 0.9,
     }
-    pad_id = getattr(tokenizer, "pad_token_id", None) or getattr(
-        tokenizer, "eos_token_id", None
-    )
+    inner = getattr(tokenizer, "tokenizer", None) or tokenizer
+    pad_id = getattr(inner, "pad_token_id", None) or getattr(inner, "eos_token_id", None)
     if pad_id is not None:
         gen_kwargs["pad_token_id"] = pad_id
     out = model.generate(**inputs, **gen_kwargs)
-    gen_ids = out[0][inputs["input_ids"].shape[1] :]
-    text = tokenizer.decode(gen_ids, skip_special_tokens=True)
-    text = text.replace(IM_START, "").replace(IM_END, "").strip()
+    seq = out.sequences[0] if hasattr(out, "sequences") else out[0]
+    input_len = inputs["input_ids"].shape[-1]
+    text = _decode(tokenizer, seq[input_len:])
+    text = strip_think(text.replace(IM_START, "").replace(IM_END, ""))
     return text
 
 

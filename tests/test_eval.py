@@ -1,5 +1,6 @@
 """Eval metrics — CPU only, no model load."""
 
+from korean_sft.eval import encode_prompt, strip_think
 from korean_sft.eval_metrics import expected_honorific, score_text, summarize_run
 from korean_sft.paths import REPO_ROOT
 
@@ -70,6 +71,29 @@ def test_gold_ceiling_is_high():
     assert s["honorific_pass_rate"] >= 0.9
     assert s["ai_tell_rate"] == 0
     assert s["topic_mismatch_rate"] == 0
+
+
+def test_strip_think_block():
+    raw = "<think>\nplan\n</think>\n엄마, 다녀왔어요."
+    assert strip_think(raw) == "엄마, 다녀왔어요."
+
+
+def test_encode_prompt_uses_text_kwarg_not_images():
+    class FakeProcessor:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, images=None, text=None, videos=None, **kwargs):
+            self.calls.append({"images": images, "text": text, "kwargs": kwargs})
+            if images is not None and text is None:
+                raise AssertionError("positional text must not be treated as images")
+            return {"input_ids": [[1, 2, 3]]}
+
+    proc = FakeProcessor()
+    out = encode_prompt(proc, "안녕하세요")
+    assert out["input_ids"] == [[1, 2, 3]]
+    assert proc.calls and proc.calls[0]["text"] == "안녕하세요"
+    assert proc.calls[0]["images"] is None
 
 
 def test_summarize_run():
