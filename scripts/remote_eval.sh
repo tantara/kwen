@@ -36,5 +36,8 @@ for p in Path("reports").glob("eval-*.json"):
     for k in ("base", "adapter", "model"):
         if k in r and "summary" in r[k]:
             s = r[k]["summary"]
-            print(f"  {k}: naturalness={s['mean_naturalness']} honorific={s['honorific_pass_rate']} ai_tell={s['ai_tell_rate']} mismatch={s['topic_mismatch_rate']}")
+            print(f"  {k}: pass={s.get('pass_rate')} hon={s.get('honorific_pass_rate')} s1={s.get('s1_rate', s.get('ai_tell_rate'))} echo={s.get('instruction_echo_rate')} meta={s.get('meta_speech_rate')}")
+            for t, ts in (s.get("by_track") or {}).items():
+                if ts.get("n"):
+                    print(f"    {t}: n={ts['n']} pass={ts.get('pass_rate')} hon={ts.get('honorific_pass_rate')} s1={ts.get('s1_rate')}")
 PY

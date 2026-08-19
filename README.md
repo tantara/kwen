@@ -88,17 +88,23 @@ uv run python -m korean_sft train --dry-run --dataset data/sft/train_fivepage.js
 
 ## Eval (natural Korean)
 
-24 held-out scenarios (반말/존댓말, 세대, 조문 vs 분식, 창구, 보고) with gold replies.
-CPU scores honorific mix, AI-tell, clichés, topic mismatch (0–100 naturalness).
-GPU generates with the base model and LoRA adapters, then scores the same axes.
+24 held-out scenarios in two tracks, scored with the cloned-repo gates (not one blended naturalness number):
+
+| Track | Scenarios | Target | Gates |
+|---|---|---|---|
+| **S** speech | 반말 / 해요체 / 창구 | fluent-korean + im-not-ai | honorific mix, `하였` injection, S1 taxonomy, C-11 연결어미 쉼표, instruction echo |
+| **R** record | 한다체 / 합니다체 보고 | korean-report-style + im-not-ai D/A | 해요/반말 in a record, lint `했다`→`하였다`, S1, echo |
+
+Gold replies are a CPU ceiling (`pass_rate` should be 1.0). GPU generates with the base model and LoRA adapters, then scores the same axes per track.
 
 ```bash
 uv run python -m korean_sft eval --score-only
+uv run python -m korean_sft eval --score-only --track S
+uv run python -m korean_sft eval --score-only --track R
 # on GPU (base vs LoRA):
 python -m korean_sft eval --model Qwen/Qwen3.5-4B \
   --adapter outputs/qwen35-4b-onepage --compare-base \
   --out reports/eval-4b.json
-# both sizes:
 bash scripts/remote_eval.sh
 ```
 

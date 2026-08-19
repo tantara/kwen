@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .eval_metrics import score_text, summarize_run
+from .eval_metrics import scenario_track, score_text, summarize_run
 from .pack import IM_END, IM_START, apply_chat_template
 from .paths import EVAL_SCENARIOS
 
@@ -57,6 +57,7 @@ def score_prediction(scenario: dict[str, Any], text: str) -> dict[str, Any]:
         "speech_level": scenario.get("speech_level"),
         "relation": scenario.get("relation"),
         "generation_axis": scenario.get("generation"),
+        "track": metrics.get("track") or scenario_track(scenario),
         "output": text,
         **metrics,
     }
@@ -197,12 +198,29 @@ def run_model(
 
 def print_summary(label: str, summary: dict[str, Any]) -> None:
     print(
-        f"{label}: n={summary['n']}  naturalness={summary['mean_naturalness']}  "
-        f"honorific={summary['honorific_pass_rate']}  "
-        f"ai_tell={summary['ai_tell_rate']}  "
-        f"cliche={summary['cliche_rate']}  "
-        f"topic_mismatch={summary['topic_mismatch_rate']}"
+        f"{label}: n={summary.get('n', 0)}  pass={summary.get('pass_rate', 0)}  "
+        f"honorific={summary.get('honorific_pass_rate', 0)}  "
+        f"s1={summary.get('s1_rate', summary.get('ai_tell_rate', 0))}  "
+        f"echo={summary.get('instruction_echo_rate', 0)}  "
+        f"meta={summary.get('meta_speech_rate', 0)}  "
+        f"cliche={summary.get('cliche_rate', 0)}"
     )
+    for track, sub in (summary.get("by_track") or {}).items():
+        if not sub.get("n"):
+            continue
+        extra = ""
+        if track == "S":
+            extra = f"  hayeot={sub.get('hayeot_injection_rate', 0)}"
+        else:
+            extra = (
+                f"  lint_fix={sub.get('lint_fix_rate', 0)}"
+                f"  colloquial={sub.get('colloquial_in_record_rate', 0)}"
+            )
+        print(
+            f"  {track}: n={sub['n']}  pass={sub.get('pass_rate', 0)}  "
+            f"honorific={sub.get('honorific_pass_rate', 0)}  "
+            f"s1={sub.get('s1_rate', 0)}{extra}"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -224,10 +242,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-seq-length", type=int, default=1536)
     p.add_argument("--max-new-tokens", type=int, default=280)
     p.add_argument("--limit", type=int, default=0, help="Score only the first N scenarios")
+    p.add_argument(
+        "--track",
+        choices=("S", "R"),
+        default=None,
+        help="Score only speech (S) or record (R) scenarios",
+    )
     p.add_argument("--out", type=Path, default=None)
     args = p.parse_args(argv)
 
     scenarios = load_jsonl(args.scenarios)
+    if args.track:
+        scenarios = [s for s in scenarios if scenario_track(s) == args.track]
     if args.limit and args.limit > 0:
         scenarios = scenarios[: args.limit]
     report: dict[str, Any] = {"scenarios": str(args.scenarios), "n": len(scenarios)}
@@ -275,9 +301,16 @@ def main(argv: list[str] | None = None) -> int:
         report[key] = {"summary": summarize_run(ft_rows), "rows": ft_rows}
         print_summary(key, report[key]["summary"])
         if "base" in report:
-            b = report["base"]["summary"]["mean_naturalness"]
-            a = report[key]["summary"]["mean_naturalness"]
-            print(f"delta naturalness (adapter - base): {a - b:+.2f}")
+            b = report["base"]["summary"].get("pass_rate", 0)
+            a = report[key]["summary"].get("pass_rate", 0)
+            print(f"delta pass_rate (adapter - base): {a - b:+.3f}")
+            for track in ("S", "R"):
+                bt = (report["base"]["summary"].get("by_track") or {}).get(track, {})
+                at = (report[key]["summary"].get("by_track") or {}).get(track, {})
+                if bt.get("n") or at.get("n"):
+                    print(
+                        f"  {track} pass {bt.get('pass_rate', 0)} → {at.get('pass_rate', 0)}"
+                    )
     else:
         p.print_help()
         return 2
