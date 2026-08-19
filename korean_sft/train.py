@@ -224,6 +224,20 @@ def main(argv: list[str] | None = None) -> int:
         print("dry-run ok: SFT on `text` with 16-bit LoRA (load_in_4bit=false)")
         return 0
 
+    if args.train:
+        # Load once inside run_sft — a prior try_unsloth_load would double VRAM.
+        try:
+            run_sft(cfg, dataset)
+        except Exception as exc:  # noqa: BLE001
+            print(
+                "UNSLOTH_UNAVAILABLE "
+                f"stage=train error={type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return 3
+        print("train ok")
+        return 0
+
     load_status = try_unsloth_load(cfg)
     print("unsloth:", json.dumps(load_status, ensure_ascii=False))
     if not load_status["ok"]:
@@ -233,9 +247,6 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 3
-    if args.train:
-        run_sft(cfg, dataset)
-        print("train ok")
     return 0
 
 
