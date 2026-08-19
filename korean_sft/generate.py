@@ -40,6 +40,8 @@ def has_batchim(word: str) -> bool:
 
 
 def eul_reul(word: str) -> str:
+    if not any("가" <= ch <= "힣" for ch in word):
+        return word + "을"
     return word + ("을" if has_batchim(word) else "를")
 
 
@@ -185,6 +187,146 @@ def _nouns(topic: str) -> tuple[str, ...]:
     return TOPIC_NOUNS.get(topic, (topic, "일", "자리", "사람", "이야기", "시간"))
 
 
+# Scene cluster so 조문 is not narrated like a snack shop.
+_FOOD = {
+    "동네 분식집", "배달 음식 후기", "카페 자리 다툼", "회식 자리", "집밥과 반찬",
+    "편의점 야식", "전통시장 장보기", "김장", "요리 클래스",
+}
+_WORK = {
+    "야근과 잔업", "주간 업무 보고", "코드 인수인계", "채용 면접", "이직 고민",
+    "프리랜서 계약", "성과 평가", "재택근무", "회의록 정리", "알바 면접",
+}
+_SCHOOL = {
+    "중간고사 대비", "졸업 논문", "학부모 상담", "동아리 모임", "수능 전날",
+    "학교 급식", "과외 상담",
+}
+_RITUAL = {"명절 차례", "조문", "결혼식 축사", "동창회", "병문안"}
+_HOUSING = {
+    "이사와 짐", "전세 갱신", "월세 인상", "층간소음", "관리비 고지",
+    "부동산 매물", "아파트 주차",
+}
+_HEALTH = {"감기와 약국", "헬스장 등록", "건강검진 결과", "한의원 침", "반려동물 병원"}
+_TRAVEL = {"기차 연착", "제주 여행", "주말 등산", "해외여행 준비", "고속버스", "출근길 지하철"}
+_LAB = {"연구 노트", "실험실 안전", "학회 발표"}
+
+
+def cluster_of(topic: str) -> str:
+    if topic in _FOOD:
+        return "food"
+    if topic in _WORK:
+        return "work"
+    if topic in _SCHOOL:
+        return "school"
+    if topic in _RITUAL:
+        return "ritual"
+    if topic in _HOUSING:
+        return "housing"
+    if topic in _HEALTH:
+        return "health"
+    if topic in _TRAVEL:
+        return "travel"
+    if topic in _LAB:
+        return "lab"
+    return "daily"
+
+
+CLUSTER_CASUAL_OPEN: dict[str, tuple[str, ...]] = {
+    "food": (
+        "{day} {place}에서 {noun_obj} 먹었어. {price}원 나왔어.",
+        "{day} {name_and} {place}에서 {noun} 시켰어. 양이 {n}인분이었어.",
+        "나 {age}살 {background}인데, {topic} 때문에 {day} 정신없었어.",
+    ),
+    "work": (
+        "{day} {place}에서 {topic_obj} 처리했어. {noun_subj} 생각보다 오래 걸렸어.",
+        "{time}에 {name}이랑 {noun} 건 이야기했어. {n}번은 다시 봤어.",
+        "나 {age}살 {background_euro} {topic} 맡았는데 {day} 마감이었어.",
+    ),
+    "school": (
+        "{day} {topic} 때문에 {noun_obj} 다시 봤어. {place}에서 {n}시간 앉아 있었어.",
+        "{name_and} {topic} 이야기하다가 {noun}에서 막혔어.",
+        "나 {age}살 {background}인데 {topic} 준비가 {day}까지야.",
+    ),
+    "ritual": (
+        "{day} {place}에 {topic} 때문에 다녀왔어. {noun_obj} 챙겼어.",
+        "{topic} 자리에서 {name}을 봤어. {noun} 이야길 잠깐 나눴어.",
+        "나 {age}살 {background}인데 {day} {topic}이 있어서 오전에 나갔어.",
+    ),
+    "housing": (
+        "{day} {topic} 때문에 {noun_obj} 확인했어. {place} 집주인이 {n}시라고 했어.",
+        "{name_and} {place}에서 {noun} 이야길 했어. {price}원 이야기가 나왔어.",
+        "나 {age}살 {background}인데 {topic}이 {day}부터 겹쳤어.",
+    ),
+    "health": (
+        "{day} {place}에서 {noun_obj} 봤어. {n}분 기다렸어.",
+        "{topic} 때문에 {name}한테 {noun} 물어봤어.",
+        "나 {age}살 {background}인데 {day} {topic} 일정이 잡혔어.",
+    ),
+    "travel": (
+        "{day} {station} 타는데 {noun} 때문에 {n}분 늦었어.",
+        "{place_euro} 가는데 {topic}이 겹쳤어. {name}이랑 {noun} 확인했어.",
+        "나 {age}살 {background}인데 {day} 이동이 꼬였어.",
+    ),
+    "lab": (
+        "{day} {place}에서 {noun_obj} 점검했어. {n}번 다시 봤어.",
+        "{topic} 기록에 {noun_subj} 빠져 있어서 {name}한테 물어봤어.",
+        "나 {age}살 {background_euro} {topic} 당직이었어.",
+    ),
+    "daily": (
+        "{day} {place}에서 {topic_obj} 처리했어. {noun_subj} 생각보다 오래 걸렸어.",
+        "{name_and} {noun} 이야기하다가 {time}이 됐어.",
+        "나 {age}살 {background}인데 {day} {topic} 때문에 바빴어.",
+    ),
+}
+
+CLUSTER_CASUAL_MID: dict[str, tuple[str, ...]] = {
+    "food": (
+        "{name_subj} {other_obj} 먼저 시키길래 나도 따라서 시켰어.",
+        "가격이 {price}원이라 좀 망설였는데, {other}까지 생각하면 납득이 가더라.",
+        "솔직히 {noun_top} 기대보다 별로였고 {other_obj} 더 잘했어.",
+    ),
+    "work": (
+        "{name_subj} {other_obj} 먼저 보자고 해서 순서를 바꿨어.",
+        "{noun} 일정은 {time}인데 {other}가 더 급했어.",
+        "{n}번 다시 열어 봤는데도 {noun} 때문에 마음이 안 놓였어.",
+    ),
+    "ritual": (
+        "{name}이 {noun_obj} 어디에 둘지 물어보더라.",
+        "자리에서는 {other} 이야기가 더 많았어.",
+        "오래 있지는 못하고 {n}분쯤 있다가 나왔어.",
+    ),
+    "housing": (
+        "{name} 말로는 {noun} 숫자가 {price}원이래.",
+        "{other_obj} 빼고 생각하면 조건을 맞출 수는 있어.",
+        "{place2} 쪽 매물이랑 비교해 봤어.",
+    ),
+    "school": (
+        "{name_and} {noun} 범위가 어디인지 다시 맞춰 봤어.",
+        "{other}까지 보면 오늘 안에 끝나기는 어려워.",
+        "{n}쪽부터 다시 보기로 했어.",
+    ),
+    "health": (
+        "{noun} 수치가 {n}이라서 {other}도 같이 보자고 했어.",
+        "대기 번호가 {n}번이었어.",
+        "{name}이 예약 시간을 {time}으로 옮겨 줬어.",
+    ),
+    "travel": (
+        "{station}이 {n}분 늦는다고 해서 {other} 계획을 접었어.",
+        "{place2}에서 갈아타는 게 더 나을 것 같아.",
+        "{name}이 좌석을 다시 찍어 보냈어.",
+    ),
+    "lab": (
+        "{noun} 기록이 {n}번 줄에서 끊겼어.",
+        "{other_obj} 다시 재는 데 {n2}분 걸렸어.",
+        "{name}이 프로토콜을 한 줄 고쳤어.",
+    ),
+    "daily": (
+        "{n}번이나 다시 확인했는데도 {noun} 때문에 마음이 안 놓였어.",
+        "{place_euro} 가는 길이 {station}이라 환승이 한 번 더 있어.",
+        "요즘 {age}살에 {background} 하면서 {topic} 이런 거 자주 생겨.",
+    ),
+}
+
+
 def _pick(rng: random.Random, seq: Iterable) -> object:
     seq = tuple(seq)
     return seq[rng.randrange(len(seq))]
@@ -201,6 +343,7 @@ def _facts(spec: DiversitySpec, rng: random.Random) -> dict[str, str]:
     n = int(_pick(rng, NUMBERS))
     price = int(_pick(rng, PRICES))
     station = str(_pick(rng, STATIONS))
+    place2 = str(_pick(rng, [p for p in PLACES if p != place] or PLACES))
     return {
         "topic": spec.topic,
         "noun": noun,
@@ -214,6 +357,7 @@ def _facts(spec: DiversitySpec, rng: random.Random) -> dict[str, str]:
         "station": station,
         "age": str(spec.age),
         "background": spec.background,
+        "background_euro": euro(spec.background),
         "noun_obj": eul_reul(noun),
         "noun_subj": i_ga(noun),
         "noun_top": eun_neun(noun),
@@ -222,7 +366,8 @@ def _facts(spec: DiversitySpec, rng: random.Random) -> dict[str, str]:
         "name_subj": i_ga(name),
         "topic_obj": eul_reul(spec.topic),
         "topic_top": eun_neun(spec.topic),
-        "place2": str(_pick(rng, [p for p in PLACES if p != place] or PLACES)),
+        "place2": place2,
+        "place2_subj": i_ga(place2),
         "name2": str(_pick(rng, [g for g in GIVEN if g != name] or GIVEN)),
         "n2": str(int(_pick(rng, NUMBERS))),
         "price2": f"{int(_pick(rng, PRICES)):,}",
@@ -232,6 +377,7 @@ def _facts(spec: DiversitySpec, rng: random.Random) -> dict[str, str]:
         "day2": str(_pick(rng, DAYS)),
         "time2": str(_pick(rng, TIMES)),
         "noun_and": noun + ("이랑" if has_batchim(noun) else "랑"),
+        "name_and": name + ("이랑" if has_batchim(name) else "랑"),
         "name_voc": name + ("아" if has_batchim(name) else "야"),
         "addressee": spec.addressee,
         "addressee_age": str(spec.addressee_age),
@@ -252,7 +398,7 @@ CASUAL_OPEN = (
     "{time}에 {place} 갔더니 {noun_subj} 이미 동이 났어.",
     "{day} {station} 타는데 {noun} 생각나서 {name}한테 바로 톡 보냈어.",
     "야, {place} {noun} 먹어봤어? 나 {day} 처음 가봤는데 {n}분이나 기다렸어.",
-    "{background}로 일하면서 {topic} 겪으니까 그냥 넘기기가 어렵더라.",
+    "{background_euro} 일하면서 {topic} 겪으니까 그냥 넘기기가 어렵더라.",
     "{day} {place}에서 {name}이 {noun_obj} 가져왔는데 양이 {n}인분이었어.",
 )
 
@@ -425,8 +571,8 @@ CASUAL_P4 = (
 
 CASUAL_P5 = (
     "정리하면 {topic}은 하루로 안 끝났어. {noun_obj} 기준으로 내일 다시 보고, {other}는 천천히 볼게.",
-    "주변에서는 {place}가 편하대. 나는 {place2}가 더 익숙해서 거기로 갈 것 같아. {name}만 시간 되면 돼.",
-    "이런 일을 {age}살에 또 겪을 줄은 몰랐어. {background}로 사는 동안 {topic}은 몇 번이고 반복되는 느낌이야.",
+    "주변에서는 {place}가 편하대. 나는 {place2_subj} 더 익숙해서 거기로 갈 것 같아. {name}만 시간 되면 돼.",
+    "이런 일을 {age}살에 또 겪을 줄은 몰랐어. {background_euro} 사는 동안 {topic_top} 몇 번이고 반복되는 느낌이야.",
     "마지막으로 {n2}시 전에 {noun} 사진만 받아 두면 돼. 나머지는 {day2}에 이어서 하자.",
 )
 
@@ -484,19 +630,19 @@ DIALOGUES: dict[str, tuple[str, ...]] = {
         "말씀하신 {noun} 확인했어요. {time}까지는 들어갈게요.",
     ),
     "parent_to_child": (
-        "{name_voc}, {noun}은 네가 먼저 해. 엄마는 {other} 볼게.",
+        "{name_voc}, {noun_top} 네가 먼저 해. 엄마는 {other} 볼게.",
         "너는 {age}살이야. {topic} 정도는 혼자 해도 돼.",
-        "{name_voc}, {time} 전에 들어와. {noun}은 내일 해도 늦지 않아.",
+        "{name_voc}, {time} 전에 들어와. {noun_top} 내일 해도 늦지 않아.",
     ),
     "grandchild_to_grandparent": (
-        "할머니, 저 {place}에서 {noun_obj} 사 왔어요. 따뜻할 때 드세요.",
-        "할아버지, 계단 조심하세요. {noun}은 제가 들게요.",
+        "할머니, 저 {place}에 다녀왔어요. {noun_obj} 챙겼어요.",
+        "할아버지, 계단 조심하세요. {noun_top} 제가 들게요.",
         "오늘 {topic} 때문에 늦었어요. 먼저 앉아서 쉬세요.",
     ),
     "grandparent_to_grandchild": (
-        "그래, {name_voc}. {noun}은 여기 두고 손부터 씻어.",
+        "그래, {name_voc}. {noun_top} 여기 두고 손부터 씻어.",
         "천천히 해. 할아버지는 {other}만 보면 돼.",
-        "{name_voc}, {n}시만 넘기지 마. 밥은 남겨 둘게.",
+        "{name_voc}, {n}시만 넘기지 마. 나머지는 내가 볼게.",
     ),
     "junior_to_senior": (
         "선배, {noun} 건 제가 먼저 볼게요. 검토해 주시겠어요?",
@@ -504,14 +650,14 @@ DIALOGUES: dict[str, tuple[str, ...]] = {
         "{addressee}께 {noun} 일정만 여쭤봐도 될까요?",
     ),
     "senior_to_junior": (
-        "{name_voc}, {noun}은 네가 맡아. 막히면 그때 와.",
+        "{name_voc}, {noun_top} 네가 맡아. 막히면 그때 와.",
         "이번엔 {other_obj} 먼저 해. 보고는 {time}에 주면 돼.",
         "괜찮아, 그 정도면 됐어. {noun}만 내일 이어서 하자.",
     ),
     "student_to_teacher": (
         "선생님, {noun} 범위가 {n}번까지 맞나요? 다시 여쭤볼게요.",
         "교수님, {topic} 관련해서 질문 하나 드려도 될까요?",
-        "과제 {noun}은 오늘 안에 제출할게요.",
+        "과제 {noun_top} 오늘 안에 제출할게요.",
     ),
     "teacher_to_student": (
         "{name_voc}, {noun}부터 다시 해 봐. {other}는 다음에 하자.",
@@ -529,12 +675,12 @@ DIALOGUES: dict[str, tuple[str, ...]] = {
         "제 이름은 {name}이에요. {other}는 나중에 나눠요.",
     ),
     "in_law_younger": (
-        "어머님, {noun}은 제가 할게요. 앉아서 좀 쉬세요.",
+        "어머님, {noun_top} 제가 할게요. 앉아서 좀 쉬세요.",
         "장인어른, {place} 교통이 복잡해요. {time}에 출발하시는 게 좋겠어요.",
         "{addressee}께 {topic} 일정만 미리 말씀드릴게요.",
     ),
     "staff_to_customer": (
-        "손님, {noun}은 이쪽으로 오시면 됩니다. {n}번 창구입니다.",
+        "손님, {noun_top} 이쪽으로 오시면 됩니다. {n}번 창구입니다.",
         "잠시만 기다려 주세요. {other} 확인하는 데 {n2}분 걸립니다.",
         "영수증과 {noun} 내역을 함께 드리겠습니다.",
     ),
@@ -549,29 +695,49 @@ def to_haeyo(text: str) -> str:
         ("더라고", "더라고요"),
         ("거든", "거든요"),
         ("거야", "거예요"),
+        ("말이야", "말이에요"),
         ("을게", "을게요"),
         ("할게", "할게요"),
         ("줄게", "줄게요"),
         ("볼게", "볼게요"),
         ("갈게", "갈게요"),
+        ("둘게", "둘게요"),
+        ("몰랐어", "몰랐어요"),
+        ("샀어", "샀어요"),
+        ("줬어", "줬어요"),
+        ("뒀어", "뒀어요"),
+        ("했어", "했어요"),
+        ("됐어", "됐어요"),
+        ("갔어", "갔어요"),
+        ("왔어", "왔어요"),
+        ("봤어", "봤어요"),
         ("었어", "었어요"),
         ("았어", "았어요"),
         ("였어", "였어요"),
         ("졌어", "졌어요"),
-        ("갔어", "갔어요"),
         ("났어", "났어요"),
-        ("됐어", "됐어요"),
         ("쳤어", "쳤어요"),
         ("렸어", "렸어요"),
+        ("렀어", "렀어요"),
+        ("나눴어", "나눴어요"),
         ("랐어", "랐어요"),
-        ("왔어", "왔어요"),
-        ("봤어", "봤어요"),
+        ("싶어", "싶어요"),
+        ("않아", "않아요"),
+        ("몰라", "몰라요"),
+        ("그랬어", "그랬어요"),
+        ("있어.", "있어요."),
+        ("없어.", "없어요."),
+        ("하려고.", "하려고요."),
         ("같아", "같아요"),
         ("많아", "많아요"),
         ("좋아", "좋아요"),
         ("싫어", "싫어요"),
         ("힘들어", "힘들어요"),
         ("괜찮아", "괜찮아요"),
+        ("빨라", "빨라요"),
+        ("달라", "달라요"),
+        ("하자.", "하죠."),
+        ("하자 ", "하죠 "),
         ("줘.", "주세요."),
         ("줘,", "주세요,"),
         ("마.", "마세요."),
@@ -581,6 +747,8 @@ def to_haeyo(text: str) -> str:
         ("지?", "죠?"),
         ("이야.", "이에요."),
         ("이야,", "이에요,"),
+        ("더라.", "더라고요."),
+        ("더라,", "더라고요,"),
     )
     out = text
     for src, dst in sorted(pairs, key=lambda kv: -len(kv[0])):
@@ -683,11 +851,8 @@ def _inject_ai_tell(text: str, spec: DiversitySpec, rng: random.Random) -> str:
     mid = sentences[len(sentences) // 2]
     # Standalone AI-tell sentence for polish to drop. Identity lives in JSON `id`.
     tell = _ai_tell_clause(noun, spec.doc_id // 3)
-    if spec.register in ("formal", "professional"):
-        # Seed endings lint.py --fix will rewrite (됐다/했다).
-        tell = tell + " 확인됐다. 정리했다."
-        if spec.register == "professional":
-            tell = "본 문서는 " + eul_reul(spec.topic) + " 다룬다. " + tell
+    if spec.register == "professional":
+        tell = "본 문서는 " + eul_reul(spec.topic) + " 다룬다. " + tell
     glued = prefix + mid + "."
     if rng.random() < 0.7:
         glued = glued + AI_TELL_EMDASH + tell
@@ -821,12 +986,7 @@ class WriterAgent:
             blocks = []
             for i, chunk in enumerate(chunks):
                 title = titles[i % len(titles)]
-                if spec.register == "casual":
-                    head = title
-                elif spec.register == "formal":
-                    head = title
-                else:
-                    head = title
+                head = _fill(title, facts) if "{" in title else title
                 blocks.append(head + "\n\n" + "\n\n".join(chunk))
             return "\n\n".join(blocks)
         return "\n\n".join(filled)
@@ -836,10 +996,13 @@ class CasualWriterAgent(WriterAgent):
     name = "casual"
 
     def openings(self, spec: DiversitySpec) -> tuple[str, ...]:
-        return CASUAL_OPEN
+        return CLUSTER_CASUAL_OPEN.get(cluster_of(spec.topic), CLUSTER_CASUAL_OPEN["daily"])
 
     def middles(self, spec: DiversitySpec) -> tuple[str, ...]:
-        return CASUAL_MID
+        cluster = cluster_of(spec.topic)
+        specific = CLUSTER_CASUAL_MID.get(cluster, ())
+        generic = CLUSTER_CASUAL_MID["daily"]
+        return specific + generic if specific else generic
 
     def closings(self, spec: DiversitySpec) -> tuple[str, ...]:
         return CASUAL_CLOSE

@@ -15,6 +15,35 @@ REGISTERS = ("casual", "formal", "professional")
 
 AGES = (17, 19, 22, 25, 28, 31, 34, 37, 41, 45, 49, 53, 58, 63, 68)
 
+# Plausible speaker age for each background (inclusive).
+BACKGROUND_AGES: dict[str, tuple[int, int]] = {
+    "고등학생": (16, 19),
+    "대학생": (19, 27),
+    "취업준비생": (22, 32),
+    "신입 사무직": (23, 31),
+    "중견 회사원": (30, 48),
+    "팀장급 관리자": (36, 55),
+    "공무원": (25, 58),
+    "초등학교 교사": (24, 55),
+    "고등학교 교사": (25, 58),
+    "간호사": (23, 55),
+    "병원 원무과": (24, 55),
+    "소프트웨어 개발자": (24, 45),
+    "디자이너": (24, 42),
+    "자영업 사장님": (30, 62),
+    "카페 알바": (18, 28),
+    "배달 라이더": (20, 40),
+    "현장 기능직": (25, 55),
+    "프리랜서 작가": (26, 50),
+    "육아 중인 부모": (28, 45),
+    "전업주부": (30, 55),
+    "은퇴 후 자원봉사자": (60, 75),
+    "농촌 거주 농업인": (40, 70),
+    "부동산 중개사": (30, 60),
+    "학원 강사": (24, 45),
+    "사회복지사": (25, 50),
+}
+
 BACKGROUNDS = (
     "고등학생",
     "대학생",
@@ -166,6 +195,36 @@ def _clamp_age(n: int) -> int:
     return max(8, min(85, n))
 
 
+def _age_for_background(background: str, doc_id: int) -> int:
+    lo, hi = BACKGROUND_AGES.get(background, (22, 60))
+    candidates = [a for a in AGES if lo <= a <= hi]
+    if not candidates:
+        return max(lo, min(hi, 35))
+    return candidates[doc_id % len(candidates)]
+
+
+def _rel(name: str) -> tuple:
+    return next(r for r in RELATIONS if r[0] == name)
+
+
+def _fit_relation(age: int, rel: tuple) -> tuple:
+    """Drop relations that contradict the speaker's age."""
+    rid = rel[0]
+    if rid == "parent_to_child" and age < 28:
+        return _rel("peers_close")
+    if rid == "grandparent_to_grandchild" and age < 55:
+        return _rel("senior_to_junior") if age < 28 else _rel("parent_to_child")
+    if rid == "grandchild_to_grandparent" and age > 45:
+        return _rel("child_to_parent")
+    if rid == "child_to_parent" and age > 50:
+        return _rel("peers_close")
+    if rid == "student_to_teacher" and age > 35:
+        return _rel("junior_to_senior")
+    if rid == "teacher_to_student" and age < 24:
+        return _rel("peers_close")
+    return rel
+
+
 def spec_for_id(doc_id: int) -> DiversitySpec:
     """Deterministic unique-enough assignment covering every axis."""
     if doc_id < 0:
@@ -173,9 +232,14 @@ def spec_for_id(doc_id: int) -> DiversitySpec:
     topic = TOPICS[doc_id % len(TOPICS)]
     environment = ENVIRONMENTS[(doc_id // len(TOPICS)) % len(ENVIRONMENTS)]
     register = REGISTERS[(doc_id // (len(TOPICS) * len(ENVIRONMENTS))) % len(REGISTERS)]
-    age = AGES[(doc_id * 7) % len(AGES)]
     background = BACKGROUNDS[(doc_id * 13) % len(BACKGROUNDS)]
-    rel = RELATIONS[(doc_id * 11) % len(RELATIONS)]
+    age = _age_for_background(background, doc_id * 7)
+    rel = _fit_relation(age, RELATIONS[(doc_id * 11) % len(RELATIONS)])
+    # parent_to_child fallback when age is too low after remap
+    if rel[0] == "parent_to_child" and age < 28:
+        rel = next(r for r in RELATIONS if r[0] == "peers_close")
+    if rel[0] == "grandparent_to_grandchild" and age < 55:
+        rel = next(r for r in RELATIONS if r[0] == "senior_to_junior")
     rel_id, speech_level, generation, addressee, delta = rel
     return DiversitySpec(
         doc_id=doc_id,

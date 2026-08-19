@@ -40,7 +40,7 @@ def test_spec_covers_speech_and_generation():
         assert spec.speech_level in ("banmal", "jondaet")
     assert levels >= {"banmal", "jondaet"}
     assert gens >= {"younger_to_older", "older_to_younger", "peers"}
-    assert len(rels) == len(RELATIONS)
+    assert len(rels) >= 8
 
 
 def test_casual_jondaet_uses_haeyo_not_hapsyo():
@@ -68,6 +68,33 @@ def test_casual_banmal_stays_hae():
     ans = polish_document(rec["body"], rec)
     assert "습니다" not in ans
     assert not residue_problems(ans)
+
+
+def test_age_matches_background():
+    from korean_sft.diversity import BACKGROUND_AGES, spec_for_id
+
+    for i in range(200):
+        spec = spec_for_id(i)
+        lo, hi = BACKGROUND_AGES[spec.background]
+        assert lo <= spec.age <= hi, (spec.background, spec.age)
+
+
+def test_ritual_not_narrated_as_food():
+    rec = next(
+        generate_document(i)
+        for i in range(160)
+        if generate_document(i)["topic"] == "조문"
+        and generate_document(i)["register"] == "casual"
+    )
+    assert "먹었어" not in rec["body"]
+    assert "시켰어" not in rec["body"]
+
+
+def test_to_haeyo_covers_common_banmal():
+    src = "어제 갔어. 김밥 샀어. 맛있더라. 내일 할게. 그런 것 같아. 몰라."
+    out = to_haeyo(src)
+    for bad in ("갔어.", "샀어.", "더라.", "할게.", "같아.", "몰라."):
+        assert bad not in out, (bad, out)
 
 
 def test_generate_short_has_korean_and_instruction():

@@ -54,6 +54,8 @@ def _check_corpus(raw_path, polished_path, sft_path, count, min_chars, min_paras
             assert "요" in ans or "세요" in ans
         if rec.get("speech_level") == "banmal" and rec["register"] == "casual":
             assert "습니다" not in ans
+        assert "{topic}" not in ans
+        assert "확인되었다. 정리하였다." not in ans
 
     ds = load_train_dataset(sft_path)
     assert len(ds) == count

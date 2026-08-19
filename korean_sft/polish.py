@@ -232,15 +232,31 @@ def apply_report_lint(text: str, register: str) -> str:
     return fixed
 
 
+_LINT_SEED = (
+    "확인되었다. 정리하였다.",
+    "확인됐다. 정리했다.",
+    "확인되었다. 정리했다.",
+    "확인됐다. 정리하였다.",
+)
+
+
 def polish_document(draft: str, metadata: dict[str, Any] | None = None) -> str:
     """Pure function: (draft, metadata) → native-style answer. Register preserved."""
+    from .generate import to_haeyo
+
     meta = metadata or {}
     register = str(meta.get("register", "casual"))
     text = apply_sanitize(draft)
     text = apply_humanize_rules(text)
     text = apply_fluent_korean(text)
     text = apply_report_lint(text, register)
-    text = re.sub(r" {2,}", " ", text).strip()
+    for seed in _LINT_SEED:
+        text = text.replace(seed, "")
+    if register == "casual" and meta.get("speech_level") == "jondaet":
+        text = to_haeyo(text)
+    text = re.sub(r" {2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r" \.", ".", text).strip()
     if not text:
         raise ValueError("polish produced empty text")
     return text
