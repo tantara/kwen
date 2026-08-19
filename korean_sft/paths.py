@@ -19,6 +19,7 @@ ONEPAGE_SFT_PATH = DATA_DIR / "sft" / "train_onepage.jsonl"
 FIVEPAGE_RAW_PATH = DATA_DIR / "raw" / "fivepage.jsonl"
 FIVEPAGE_POLISHED_PATH = DATA_DIR / "polished" / "fivepage.jsonl"
 FIVEPAGE_SFT_PATH = DATA_DIR / "sft" / "train_fivepage.jsonl"
+EVAL_SCENARIOS = DATA_DIR / "eval" / "scenarios.jsonl"
 
 FLUENT_KOREAN = SKILLS_DIR / "fluent-korean"
 HUMANIZE_KOREAN = SKILLS_DIR / "humanize-korean"

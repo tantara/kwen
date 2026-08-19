@@ -5,6 +5,10 @@ __pycache__/
 .uv/
 uv.lock.bak
 outputs_qwen35/
+outputs/
+reports/
+logs/
+unsloth_compiled_cache/
 .DS_Store
 *.egg-info/
 dist/

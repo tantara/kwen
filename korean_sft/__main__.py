@@ -8,7 +8,9 @@ import sys
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help"):
-        print("usage: python -m korean_sft {generate|polish|pack|train|pipeline|stats} ...")
+        print(
+            "usage: python -m korean_sft {generate|polish|pack|train|pipeline|stats|eval} ..."
+        )
         return 0
     cmd, rest = argv[0], argv[1:]
     if cmd == "generate":
@@ -31,6 +33,10 @@ def main(argv: list[str] | None = None) -> int:
         from .stats import main as st
 
         return st(rest)
+    if cmd == "eval":
+        from .eval import main as ev
+
+        return ev(rest)
     if cmd == "pipeline":
         from .diversity import FIVEPAGE_COUNT, ONEPAGE_COUNT, TARGET_COUNT
         from .generate import generate_corpus
